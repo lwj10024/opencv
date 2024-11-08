@@ -3,6 +3,10 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# 忽略编译生成的文件，包括 opencv_world4100d.dll
+
+
+
 # User-specific files
 *.rsuser
 *.suo
@@ -97,6 +101,8 @@ StyleCopReport.xml
 *.pidb
 *.svclog
 *.scc
+
+
 
 # Chutzpah Test files
 _Chutzpah*
