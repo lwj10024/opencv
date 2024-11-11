@@ -15,14 +15,15 @@ void drawRects(Mat& frame, vector<Rect>& object);
 void showImage(const Mat& frame);
 void runFaceDetection();
 
-
 void drawHistline(InputArray src, OutputArray des, int size, const vector<float>& range = {0,256});
 
 void thresBinary(InputArray src, OutputArray des,double value);
 void CannyDetec(InputArray src, OutputArray des,double value,double times);
 void Contours(InputArray src);
-void templateMatching(InputArray image, InputArray templ);
+void templateMatching(Mat image, Mat templ, vector<Rect>& object);
 
+void templates(vector<Mat>& templates);
+string recognizeGesture(Mat& frame, const vector<Mat>& templates);
 /**
  * @brief. 加载人脸检测的分类器
  * @param const string&  cascadePath 分类器的路径
@@ -87,8 +88,10 @@ void showImage(const Mat& frame) {
 void runFaceDetection() {
 	string cascadePath =samples::findFile("D:/Libs/opencv/sources/data/haarcascades/haarcascade_frontalface_default.xml",true,true);
 	CascadeClassifier face_cascade = loadFaceCascade(cascadePath);
-	
-	   // 打开摄像头
+	//模板图片
+	vector<Mat> templateImages;
+	templates(templateImages);
+	// 打开摄像头
 	VideoCapture cap(0);
 	if (!cap.isOpened()) {
 		cerr << "Error opening video stream or file\n";
@@ -103,11 +106,21 @@ void runFaceDetection() {
 			break;  // 如果没有捕获到图像，退出
 		}
 
-		// 处理当前帧：进行人脸检测
-		processFrame(frame, face_cascade);
+		//// 处理当前帧：进行人脸检测
+		//processFrame(frame, face_cascade);
+		// //人脸显示检测结果
+		//showImage(frame);
+		
+		//特征识别
+		string gesture=recognizeGesture(frame, templateImages);
+		// 在图像上显示识别结果
+		putText(frame, "Gesture: " + gesture, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(255, 255, 255), 2);
+		imshow("Gesture Recognition", frame);
 
-		// 显示检测结果
-		showImage(frame);
+		//// 检测退出条件
+		//if (waitKey(30) >= 0)
+		//	break;
+		//
 
 		// 按 'q' 键退出
 		if (waitKey(1) == 'q') {
@@ -117,7 +130,7 @@ void runFaceDetection() {
 
 	// 释放摄像头资源
 	cap.release();
-	destroyAllWindows();
+	destroyAllWindows(); 
 }
 /**
  * .@brief 计算灰度直方图
@@ -221,7 +234,7 @@ void Contours(InputArray src)
  * \param image
  * \param templ
  */
-void templateMatching(Mat image, Mat templ)
+void templateMatching(Mat image, Mat templ, vector<Rect> &object)
 {
 
 	Mat resultMat; // 结果矩阵
@@ -229,7 +242,6 @@ void templateMatching(Mat image, Mat templ)
 	Point minLoc; // 保存最小值位置，即矩形起点
 	minMaxLoc(resultMat, 0, 0, &minLoc); // 最小值位置
 	Rect rect{ minLoc, templ.size() }; //创建Rect对象
-	vector<Rect> object;
 	object.push_back(rect);
 
 	drawRects(image, object);
@@ -238,20 +250,93 @@ void templateMatching(Mat image, Mat templ)
 	namedWindow("匹配", WINDOW_NORMAL);
 	imshow("匹配", image);
 }
+/**
+ * .模板加载
+ * 
+ * \param templates
+ */
+void templates(vector<Mat>& templates)
+{
+	Mat Rock = imread("../resources/images/石头.jpg");
+	Mat	Paper = imread("../resources/images/布.jpg");
+	Mat Scissors= imread("../resources/images/剪刀.jpg");
+	if (Rock.empty() || Paper.empty() || Scissors.empty()) {
+		cerr << "Error: Could not load one or more template images!" << endl;
+		return;
+	}
+	templates.push_back(Rock);
+	templates.push_back(Paper);
+	templates.push_back(Scissors);
+}
+/**
+ * .手势识别，多模板匹配
+ * 
+ * \param frame
+ * \param templates
+ * \return 
+ */
+string recognizeGesture(Mat& frame, const vector<Mat>& templates)
+{
+	Mat gray,binary,resultMat;
+	cvtColor(frame, gray, COLOR_BGR2GRAY);
+	thresBinary(gray, binary, 100);
+
+	string gesture = "Unknown";
+	double maxVal = 0;
+	for (int i = 0; i < templates.size(); i++) {
+		//差平方匹配
+		matchTemplate(binary, templates[i], resultMat, TM_CCOEFF_NORMED);
+
+		// 找到图像中的最小和最大灰度值，以及它们的位置
+		Point minLoc, maxLoc;
+		double minVal, maxValTemp ,maxVal=0;
+		minMaxLoc(resultMat, &minVal, &maxValTemp, &minLoc, &maxLoc);
+		//创建Rect对象,绘制矩形
+		Rect rect{ minLoc, templates[i].size() };
+		vector<Rect> object;
+		object.push_back(rect);
+		drawRects(frame, object);
+
+		if (maxValTemp > maxVal) {
+			maxVal = maxValTemp;
+			switch (i) {
+			case 0: gesture = "Rock"; break; // 石头
+			case 1: gesture = "Scissors"; break; // 剪刀
+			case 2: gesture = "Paper"; break; // 布
+			}
+		}
+	}
+	return gesture;
+}
 
 int main(int argc,char* argv[])
 {	
-	//runFaceDetection();//人脸检测
+	VideoCapture cap(0);
+	if (!cap.isOpened()) {
+		cerr << "Error opening video stream or file\n";
+		return -1;
+	}
+	cap.release();
+	destroyAllWindows();
+	//Mat img = imread("../resources/images/cat1.bmp");//原图片
+	//Mat templ = imread("../resources/images/eyes.png ");
+	//if (img.empty()|| templ.empty())return -1;
+	///*namedWindow("test", WINDOW_NORMAL);
+	//imshow("test", img);*/
 
-	Mat img = imread("../resources/images/cat1.bmp");//原图片
-	Mat templ = imread("../resources/images/eyes.png ");
-	if (img.empty()|| templ.empty())return -1;
-	/*namedWindow("test", WINDOW_NORMAL);
-	imshow("test", img);*/
+	//vector<Mat> templates;
+	//for (const auto& templ : templates) {
+	//	if (templ.empty()) {
+	//		cerr << "Error loading template images!" << endl;
+	//		return -1;
+	//	}
+	//}
+	//runFaceDetection();//人脸检测
+	// 
 	
 	// 转换为灰度图像
-	Mat gray;
-	cvtColor(img, gray, COLOR_BGR2GRAY);
+	//Mat gray;
+	//cvtColor(img, gray, COLOR_BGR2GRAY);
 
 	//Mat histimg(300, 384, CV_8U);//直方图
 	//drawHistline(img, histimg, 128);
@@ -269,8 +354,10 @@ int main(int argc,char* argv[])
 
 	//Contours(thresh);//轮廓检测
 
-    templateMatching(img, templ);//模板检测
+	//vector<Rect> object;
+	//templateMatching(img, templ,object);//模板检测
 
+	
 	waitKey(0);//阻塞
 	return 0;
 }
