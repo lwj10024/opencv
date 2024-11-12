@@ -123,7 +123,8 @@
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
-      <Command>xcopy "$(CPP_LIBS)opencv\build\x64\vc16\bin\opencv_world4100d.dll" "$(SolutionDir)build\"/s /e /i /d /y</Command>
+      <Command>xcopy "$(CPP_LIBS)opencv\build\x64\vc16\bin\opencv_world4100d.dll" "$(SolutionDir)build\"/s /e /i /d /y
+xcopy "$(CPP_LIBS)opencv\build\bin\opencv_videoio_ffmpeg4100_64.dll" "$(SolutionDir)build\"/s /e /i /d /y</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">

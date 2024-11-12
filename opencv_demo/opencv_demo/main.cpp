@@ -24,6 +24,7 @@ void templateMatching(Mat image, Mat templ, vector<Rect>& object);
 
 void templates(vector<Mat>& templates);
 string recognizeGesture(Mat& frame, const vector<Mat>& templates);
+void runGestureRecognition();
 /**
  * @brief. 加载人脸检测的分类器
  * @param const string&  cascadePath 分类器的路径
@@ -57,7 +58,6 @@ void processFrame(Mat& frame, CascadeClassifier& face_cascade) {
 
 	// 绘制矩形框
 	drawRects(frame, faces);
-
 }
 
 
@@ -87,12 +87,13 @@ void showImage(const Mat& frame) {
  */
 void runFaceDetection() {
 	string cascadePath =samples::findFile("D:/Libs/opencv/sources/data/haarcascades/haarcascade_frontalface_default.xml",true,true);
+	cout << "CascadePath: " << cascadePath << endl;
 	CascadeClassifier face_cascade = loadFaceCascade(cascadePath);
 	//模板图片
 	vector<Mat> templateImages;
 	templates(templateImages);
 	// 打开摄像头
-	VideoCapture cap(0);
+	VideoCapture cap(0,CAP_DSHOW);
 	if (!cap.isOpened()) {
 		cerr << "Error opening video stream or file\n";
 		return;
@@ -103,26 +104,16 @@ void runFaceDetection() {
 		cap >> frame;  // 从摄像头获取一帧图像
 
 		if (frame.empty()) {
-			break;  // 如果没有捕获到图像，退出
+			//break;  // 如果没有捕获到图像，退出
+			cerr << "Captured empty frame, skipping..." << endl;
+			continue; // 跳过该帧
 		}
+		imshow("video",frame);
 
-		//// 处理当前帧：进行人脸检测
-		//processFrame(frame, face_cascade);
-		// //人脸显示检测结果
-		//showImage(frame);
-		
-		//特征识别
-		string gesture=recognizeGesture(frame, templateImages);
-		// 在图像上显示识别结果
-		putText(frame, "Gesture: " + gesture, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(255, 255, 255), 2);
-		imshow("Gesture Recognition", frame);
-
-		//// 检测退出条件
-		//if (waitKey(30) >= 0)
-		//	break;
-		//
-
-		// 按 'q' 键退出
+		// 处理当前帧：进行人脸检测
+		processFrame(frame, face_cascade);
+		showImage(frame);
+	
 		if (waitKey(1) == 'q') {
 			break;
 		}
@@ -162,7 +153,7 @@ void drawHistline(InputArray src, OutputArray des, int size, const vector<float>
 	im.setTo(255);
 	float dx = (float)im.cols / size;
 	for (int i = 0; i < size; i++) {
-		int x = i * dx + dx / 2, y = Hist(i);
+		int x = i *(int) dx + (int)dx / 2, y = Hist(i);
 		Point pt1{ x,0 }, pt2{ x,y };
 		line(im, pt1, pt2, {0});
 	}
@@ -236,12 +227,34 @@ void Contours(InputArray src)
  */
 void templateMatching(Mat image, Mat templ, vector<Rect> &object)
 {
+	if (image.empty() || templ.empty()) {
+		cerr << "Error: Input image or template is empty!" << endl;
+		return; // 检查输入是否为空
+	}
+	Mat grayImage, grayTemplate, resultMat;
+	if (image.channels() == 3) {
+		cvtColor(image, grayImage, COLOR_BGR2GRAY);
+	}
+	else {
+		grayImage = image.clone();
+	}
+	if (templ.channels() == 3) {
+		cvtColor(templ, grayTemplate, COLOR_BGR2GRAY);
+	}
+	else {
+		grayTemplate = templ.clone();
+	}
+	if (grayImage.rows < grayTemplate.rows || grayImage.cols < grayTemplate.cols) {
+		cerr << "Error: Template size is larger than input image size!" << endl;
+		return;
+	}
+	resultMat.create(grayImage.rows - grayTemplate.rows + 1, grayImage.cols - grayTemplate.cols + 1, CV_32FC1);
 
-	Mat resultMat; // 结果矩阵
-	matchTemplate(image, templ, resultMat, TM_SQDIFF_NORMED); // 模板匹配(差平方匹配)
+	matchTemplate(grayImage, grayTemplate, resultMat, TM_SQDIFF_NORMED); // 模板匹配(差平方匹配)
 	Point minLoc; // 保存最小值位置，即矩形起点
-	minMaxLoc(resultMat, 0, 0, &minLoc); // 最小值位置
-	Rect rect{ minLoc, templ.size() }; //创建Rect对象
+	double minVal;
+	minMaxLoc(resultMat, &minVal, nullptr, &minLoc, nullptr); // 最小值位置
+	Rect rect{ minLoc, grayTemplate.size() }; //创建Rect对象
 	object.push_back(rect);
 
 	drawRects(image, object);
@@ -277,63 +290,82 @@ void templates(vector<Mat>& templates)
  */
 string recognizeGesture(Mat& frame, const vector<Mat>& templates)
 {
-	Mat gray,binary,resultMat;
+	Mat gray, frameBinary,resultMat;
 	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	thresBinary(gray, binary, 100);
+	thresBinary(gray, frameBinary, 100);
 
 	string gesture = "Unknown";
-	double maxVal = 0;
+	double maxVal = 0;// 记录最高匹配度
+	vector<Rect> objects; // 用于存放匹配到的矩形
+
 	for (int i = 0; i < templates.size(); i++) {
+		Mat grayTempl, binaryTempl;
+		cvtColor(templates[i], grayTempl, COLOR_BGR2GRAY);
+		thresBinary(grayTempl, binaryTempl, 100);
 		//差平方匹配
-		matchTemplate(binary, templates[i], resultMat, TM_CCOEFF_NORMED);
+		templateMatching(frameBinary, binaryTempl, objects);
 
-		// 找到图像中的最小和最大灰度值，以及它们的位置
-		Point minLoc, maxLoc;
-		double minVal, maxValTemp ,maxVal=0;
-		minMaxLoc(resultMat, &minVal, &maxValTemp, &minLoc, &maxLoc);
-		//创建Rect对象,绘制矩形
-		Rect rect{ minLoc, templates[i].size() };
-		vector<Rect> object;
-		object.push_back(rect);
-		drawRects(frame, object);
-
-		if (maxValTemp > maxVal) {
-			maxVal = maxValTemp;
-			switch (i) {
-			case 0: gesture = "Rock"; break; // 石头
-			case 1: gesture = "Scissors"; break; // 剪刀
-			case 2: gesture = "Paper"; break; // 布
+		if (!objects.empty()) {
+			double currentVal = 1.0 - (double)(norm(objects[0].area()) / (frameBinary.rows * frameBinary.cols)); // 计算当前匹配度
+			if (currentVal > maxVal) {
+				maxVal = currentVal;
+				switch (i) {
+				case 0: gesture = "Rock"; break; // 石头
+				case 1: gesture = "Scissors"; break; // 剪刀
+				case 2: gesture = "Paper"; break; // 布
+				}
 			}
 		}
 	}
 	return gesture;
 }
 
-int main(int argc,char* argv[])
-{	
-	VideoCapture cap(0);
+void runGestureRecognition()
+{
+	// 加载手势模板
+	vector<Mat> templateImages;
+	templates(templateImages);
+
+	// 打开摄像头
+	VideoCapture cap(0, cv::CAP_DSHOW);
 	if (!cap.isOpened()) {
-		cerr << "Error opening video stream or file\n";
-		return -1;
+		cerr << "Error opening video stream or file" << endl;
+		return;
+	}
+
+	while (true) {
+		Mat frame;
+		cap >> frame;
+		if (frame.empty()) {
+			cerr << "Captured an empty frame" << endl;
+			break; // 若捕获到空帧则退出
+		}
+		// 识别手势
+		string gesture = recognizeGesture(frame, templateImages);
+		// 在图像上显示识别结果
+		putText(frame, "Gesture: " + gesture, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(255, 255, 255), 2);
+		imshow("Gesture Recognition", frame);
+		if (waitKey(1) == 'q') {
+			break; // 按 'q' 键退出
+		}
 	}
 	cap.release();
 	destroyAllWindows();
+}
+
+int main(int argc,char* argv[])
+{	
+	
+
 	//Mat img = imread("../resources/images/cat1.bmp");//原图片
 	//Mat templ = imread("../resources/images/eyes.png ");
 	//if (img.empty()|| templ.empty())return -1;
-	///*namedWindow("test", WINDOW_NORMAL);
-	//imshow("test", img);*/
+	/*namedWindow("test", WINDOW_NORMAL);
+	imshow("test", img);*/
 
-	//vector<Mat> templates;
-	//for (const auto& templ : templates) {
-	//	if (templ.empty()) {
-	//		cerr << "Error loading template images!" << endl;
-	//		return -1;
-	//	}
-	//}
-	//runFaceDetection();//人脸检测
-	// 
 	
+
+	//runFaceDetection();//人脸检测
 	// 转换为灰度图像
 	//Mat gray;
 	//cvtColor(img, gray, COLOR_BGR2GRAY);
@@ -356,8 +388,29 @@ int main(int argc,char* argv[])
 
 	//vector<Rect> object;
 	//templateMatching(img, templ,object);//模板检测
-
 	
-	waitKey(0);//阻塞
+	//runGestureRecognition(); // 启动手势识别程序
+	//waitKey(0);//阻塞
+	//return 0;
+
+	VideoCapture cap(0, CAP_DSHOW); // 打开默认摄像头
+	if (!cap.isOpened()) {
+		std::cerr << "Error: Unable to access camera." << std::endl;
+		return -1;
+	}
+
+	Mat frame;
+	while (true) {
+		cap >> frame; // 捕获帧
+		if (frame.empty()) {
+			std::cerr << "Error: Captured empty frame." << std::endl;
+			break;
+		}
+		imshow("Camera", frame); // 显示捕获的帧
+		if (waitKey(30) >= 0) break; // 按任意键退出
+	}
+
+	cap.release(); // 释放摄像头
+	destroyAllWindows();
 	return 0;
 }
