@@ -11,7 +11,7 @@ using namespace std;
 bool startGame = false;
 bool stateResult = false;
 double initialTime = 0;
-string playerMove = "Unknown";
+string playerGesture = "";
 Mat imgAI;
 vector<int> scores = { 0, 0 }; // [AI, Player]
 vector<string> gestures = { "Rock", "Scissors", "Paper" };
@@ -27,9 +27,8 @@ void drawHistline(InputArray src, OutputArray des, int size, const vector<float>
 void thresBinary(InputArray src, OutputArray des,double value);
 void CannyDetec(InputArray src, OutputArray des,double value,double times);
 void Contours(InputArray src);
-void templateMatching(Mat image, Mat templ, vector<Rect>& object);
 
-void templates(vector<Mat>& templates);
+void templatesLoad(vector<Mat>& templates);
 string recognizeGesture(Mat& frame, const vector<Mat>& templates);
 void runGestureRecognition();
 
@@ -102,7 +101,7 @@ void runFaceDetection() {
 	CascadeClassifier face_cascade = loadFaceCascade(cascadePath);
 	//模板图片
 	vector<Mat> templateImages;
-	templates(templateImages);
+	templatesLoad(templateImages);
 	// 打开摄像头
 	VideoCapture cap(0,CAP_DSHOW);
 	if (!cap.isOpened()) {
@@ -230,72 +229,24 @@ void Contours(InputArray src)
 	imshow("Fill", des);
 
 }
-/**
- * @brief 差平方 模板匹配.
- * 
- * \param image
- * \param templ
- */
-void templateMatching(Mat image, Mat templ, vector<Rect> &object)
-{
-	// 检查输入是否为空
-	if (image.empty() || templ.empty()) {
-		cerr << "Error: Input image or template is empty!" << endl;
-		return; 
-	}
-	//预处理：灰度、大小
-	Mat grayImage, grayTemplate, resultMat;
-	if (image.channels() == 3) {
-		cvtColor(image, grayImage, COLOR_BGR2GRAY);
-	}
-	else {
-		grayImage = image.clone();
-	}
-	if (templ.channels() == 3) {
-		cvtColor(templ, grayTemplate, COLOR_BGR2GRAY);
-	}
-	else {
-		grayTemplate = templ.clone();
-	}
-	if (grayImage.rows < grayTemplate.rows || grayImage.cols < grayTemplate.cols) {
-		cerr << "Error: Template size is larger than input image size!" << endl;
-		return;
-	}
-	resultMat.create(grayImage.rows - grayTemplate.rows + 1, grayImage.cols - grayTemplate.cols + 1, CV_32FC1);
-	matchTemplate(grayImage, grayTemplate, resultMat, TM_CCOEFF_NORMED); // 相关系数匹配
-	// TM_SQDIFF 和 TM_SQDIFF_NORMED： 最小值表示最佳匹配（差异最小）。
-	//TM_CCOEFF 和 TM_CCOEFF_NORMED： 最大值表示最佳匹配（相关性最大）。
-	Point maxLoc; 
-	double maxVal;
-	minMaxLoc(resultMat, nullptr, &maxVal,nullptr ,&maxLoc);
-	if (maxVal > 0.7) { // 设定匹配度的阈值，只有当匹配度较高时才认为匹配成功
-		Rect rect{ maxLoc, grayTemplate.size() }; //创建Rect对象
-		object.push_back(rect);
-	}
-	// 画出匹配矩形框
-	drawRects(image, object);
-	namedWindow("模板", WINDOW_NORMAL);
-	imshow("模板", templ);
-	namedWindow("匹配", WINDOW_NORMAL);
-	imshow("匹配", image);
-}
+
 /**
  * .模板加载
  * 
  * \param templates
  */
-void templates(vector<Mat>& templates)
+void templatesLoad(vector<Mat>& templates)
 {
-	Mat Rock = imread("../resources/images/石头.jpg");
-	Mat	Paper = imread("../resources/images/布.jpg");
-	Mat Scissors= imread("../resources/images/剪刀.jpg");
+	Mat Rock = imread("../resources/images/Rock.png");
+	Mat	Paper = imread("../resources/images/Paper.png");
+	Mat Scissors= imread("../resources/images/Scissors.png");
 	if (Rock.empty() || Paper.empty() || Scissors.empty()) {
-		cerr << "Error: Could not load one or more template images!" << endl;
+		cout << "Error: Could not load one or more template images!" << endl;
 		return;
 	}
 	templates.push_back(Rock);
 	templates.push_back(Paper);
-	templates.push_back(Scissors);
+	templates.push_back(Scissors);	
 }
 /**
  * .手势识别，多模板匹配
@@ -306,44 +257,48 @@ void templates(vector<Mat>& templates)
  */
 string recognizeGesture(Mat& frame, const vector<Mat>& templates)
 {
-	Mat gray, frameBinary,resultMat;
-	cvtColor(frame, gray, COLOR_BGR2GRAY);
-	thresBinary(gray, frameBinary, 100);
-
-	string gesture = "Unknown";
 	double maxVal = 0;// 记录最高匹配度
 	vector<Rect> objects; // 用于存放匹配到的矩形
+	
+	// 转换为灰度图像进行匹配
+	Mat grayFrame;
+	cvtColor(frame, grayFrame, COLOR_BGR2GRAY);
 
 	for (int i = 0; i < templates.size(); i++) {
-		Mat grayTempl, binaryTempl;
-		cvtColor(templates[i], grayTempl, COLOR_BGR2GRAY);
-		thresBinary(grayTempl, binaryTempl, 100);
+		Mat result;
 		//匹配
-		templateMatching(frameBinary, binaryTempl, objects);
+		Mat grayTemplate;
+		cvtColor(templates[i], grayTemplate, COLOR_BGR2GRAY);
 
-		if (!objects.empty()) {
-			double currentVal = 1.0 - (double)(norm(objects[0].area()) / (frameBinary.rows * frameBinary.cols)); // 计算当前匹配度
-			if (currentVal > maxVal) {
-				maxVal = currentVal;
+		matchTemplate(grayFrame, grayTemplate, result, TM_CCOEFF_NORMED);
+		double minVal, maxValLocal;
+		Point minLoc, maxLoc;
+		minMaxLoc(result, &minVal, &maxValLocal, &minLoc, &maxLoc);
+		cout << "Match result for gesture " << gestures[i] << ": " << maxValLocal << endl; // 调试输出匹配值
+		
+		if (maxValLocal > maxVal && maxValLocal > 0.4) {
+				maxVal = maxValLocal;
 				switch (i) {
-				case 0: gesture = "Rock"; break; // 石头
-				case 1: gesture = "Scissors"; break; // 剪刀
-				case 2: gesture = "Paper"; break; // 布
-				}
-			}
+				case 0: playerGesture = "Rock"; break; // 石头
+				case 1: playerGesture = "Scissors"; break; // 剪刀
+				case 2: playerGesture = "Paper"; break; // 布
+				}		
+				rectangle(frame, maxLoc, Point(maxLoc.x + templates[i].cols, maxLoc.y + templates[i].rows), Scalar(0, 255, 0), 2);
+				
 		}
 	}
-	return gesture;
+	cout << "playerGesture:" << playerGesture << endl;
+	return playerGesture;
 }
 
 void runGestureRecognition()
 {
 	// 加载手势模板
 	vector<Mat> templateImages;
-	templates(templateImages);
+	templatesLoad(templateImages);
 
 	// 打开摄像头
-	VideoCapture cap(0, cv::CAP_DSHOW);
+	VideoCapture cap(1, cv::CAP_DSHOW);
 	if (!cap.isOpened()) {
 		cerr << "Error opening video stream or file" << endl;
 		return;
@@ -356,31 +311,24 @@ void runGestureRecognition()
 			cerr << "Captured an empty frame" << endl;
 			break; // 若捕获到空帧则退出
 		}
-		// 识别手势
-		string gesture = recognizeGesture(frame, templateImages);
+		
 		// 在图像上显示识别结果		
-		playGame(frame,templateImages);
-
+		playGame(frame, templateImages);
 		imshow("Gesture Recognition", frame);
-		if (waitKey(1) == 27) {
-			break; // 按 Esc键退出
-		}
-		else if (waitKey(1) == 32) {  // 按空格键开始游戏
+		char key = (char)waitKey(1);
+		if (key == 32) {  // 空格键开始游戏
 			startGame = true;
 			stateResult = false;
 			initialTime = getTickCount();
-			scores[0] = 0;
-			scores[1] = 0;
+			playerGesture = "";
+		}
+		else if (key == 27) {  // ESC 键退出
+			break;
 		}
 	}
 	cap.release();
 	destroyAllWindows();
-
 }
-
-
-
-
 
 // AI 随机数选择手势
 int aiAct() {
@@ -398,21 +346,33 @@ void playGame(Mat& frame, const vector<Mat>& templates)
 {
 	//前
 	if (startGame) {
-		if (!stateResult) {//没有结果状态
+		if (!stateResult) {
 			double timer = (getTickCount() - initialTime) / getTickFrequency();//数数3-2-1
-			putText(frame, "Time: " + to_string(int(timer)), Point(50, 50), FONT_HERSHEY_PLAIN, 2, Scalar(255, 255, 255), 2);
+			putText(frame, "Time: " + to_string(int(3-timer)), Point(50, 50), FONT_HERSHEY_PLAIN, 2, Scalar(255, 255, 255), 2);
 	
 			if (timer > 3) {
 				stateResult = true;
-				//出手
-				if (!playerMove.empty()) {
-					int aiMove = aiAct();
-					imgAI = templates[aiMove];
+				// 识别手势
+				playerGesture = recognizeGesture(frame, templates);
+				int aiMove = aiAct();
+				imgAI = templates[aiMove];
+				if (aiMove == 0) {
+					cout << "AI:石头"<< aiMove << endl;
+				}
+				else if (aiMove == 1) {
+					cout << "AI:布" << aiMove << endl;
+				}
+				else  if (aiMove == 2) {
+					cout << "AI:剪刀" << aiMove << endl;
+				}
+
+				if (!playerGesture.empty()) {
+				
 					//规则
-					if ((playerMove == "Rock" && aiMove == 1) || (playerMove == "Scissors" && aiMove == 2) || (playerMove == "Paper" && aiMove == 0)) {
+					if ((playerGesture == "Rock" && aiMove == 2) || (playerGesture == "Scissors" && aiMove == 1) || (playerGesture == "Paper" && aiMove == 0)) {
 						scores[1]++; // Player wins
 					}
-					else if ((playerMove == "Rock" && aiMove == 2) || (playerMove == "Scissors" && aiMove == 0) || (playerMove == "Paper" && aiMove == 1)) {
+					else if ((playerGesture == "Rock" && aiMove == 1) || (playerGesture == "Scissors" && aiMove == 0) || (playerGesture == "Paper" && aiMove == 2)) {
 						scores[0]++; // AI wins
 					}
 				}
@@ -420,75 +380,33 @@ void playGame(Mat& frame, const vector<Mat>& templates)
 		}
 	}
 	// 显示 AI 手势
-	if (stateResult) {
+	if (stateResult && !imgAI.empty()) {
 		Mat resizedImgAI;
-		resize(imgAI, resizedImgAI, Size(150, 150));
-		imgAI.copyTo(frame(Rect(400, 200, 150, 150)));
+		resize(imgAI, resizedImgAI, Size(100, 100));
+		resizedImgAI.copyTo(frame(Rect(300, 50, resizedImgAI.cols, resizedImgAI.rows)));
 	}
 	// 显示分数
 	putText(frame, "Player: " + to_string(scores[1]), Point(50, 100), FONT_HERSHEY_PLAIN, 2, Scalar(255, 255, 255), 2);
 	putText(frame, "AI: " + to_string(scores[0]), Point(50, 150), FONT_HERSHEY_PLAIN, 2, Scalar(255, 255, 255), 2);
+	if (stateResult && !playerGesture.empty()) {
+		putText(frame, "Player Gesture: " + playerGesture, Point(50, 200), FONT_HERSHEY_PLAIN, 2, Scalar(0, 255, 0), 2);
+	}
+
+	if (stateResult) {
+		if (scores[1] > scores[0]) {
+			putText(frame, "Player Wins!", Point(50, 250), FONT_HERSHEY_PLAIN, 2, Scalar(0, 255, 0), 2);
+		}
+		else if (scores[0] > scores[1]) {
+			putText(frame, "AI Wins!", Point(50, 250), FONT_HERSHEY_PLAIN, 2, Scalar(0, 0, 255), 2);
+		}
+		else {
+			putText(frame, "It's a Tie!", Point(50, 250), FONT_HERSHEY_PLAIN, 2, Scalar(0, 255, 255), 2);
+		}
+	}
 }
 int main(int argc,char* argv[])
 {	
-	
-
-	//Mat img = imread("../resources/images/cat1.bmp");//原图片
-	//Mat templ = imread("../resources/images/eyes.png ");
-	//if (img.empty()|| templ.empty())return -1;
-	/*namedWindow("test", WINDOW_NORMAL);
-	imshow("test", img);*/
-
-	
-
-	//runFaceDetection();//人脸检测
-	// 转换为灰度图像
-	//Mat gray;
-	//cvtColor(img, gray, COLOR_BGR2GRAY);
-
-	//Mat histimg(300, 384, CV_8U);//直方图
-	//drawHistline(img, histimg, 128);
-	//imshow("Hist",histimg);
-
-	//Mat thresh;//二值化
-	//thresBinary(gray,thresh,100);
-	//namedWindow("thresh", WINDOW_NORMAL);
-	//imshow("thresh", thresh);
-
-	//Mat cannydete;//边界检测
-	//CannyDetec(img, cannydete, 100,2);
-	//namedWindow("cannydete", WINDOW_NORMAL);
-	//imshow("cannydete", cannydete);
-
-	//Contours(thresh);//轮廓检测
-
-	//vector<Rect> object;
-	//templateMatching(img, templ,object);//模板检测
-	
-	//runGestureRecognition(); // 启动手势识别程序
-	//waitKey(0);//阻塞
-	//return 0;
-
-	/*VideoCapture cap(0, CAP_DSHOW); // 打开默认摄像头
-	if (!cap.isOpened()) {
-		std::cerr << "Error: Unable to access camera." << std::endl;
-		return -1;
-	}
-
-	Mat frame;
-	while (true) {
-		cap >> frame; // 捕获帧
-		if (frame.empty()) {
-			std::cerr << "Error: Captured empty frame." << std::endl;
-			break;
-		}
-		imshow("Camera", frame); // 显示捕获的帧
-		if (waitKey(30) >= 0) break; // 按任意键退出
-	}
-
-	cap.release(); // 释放摄像头
-	destroyAllWindows();*/
-	runGestureRecognition();
-
+	runGestureRecognition(); // 启动手势识别程序
+	waitKey(0);//阻塞
 	return 0;
 }
